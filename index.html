@@ -305,28 +305,26 @@
   <svg viewBox="0 0 32 32" fill="white"><path d="M16.001 3C9.373 3 4 8.373 4 15c0 2.386.696 4.6 1.899 6.464L4 29l7.732-1.865A11.94 11.94 0 0 0 16.001 27C22.63 27 28 21.627 28 15S22.63 3 16.001 3zm0 21.75c-1.94 0-3.75-.52-5.32-1.427l-.382-.222-4.59 1.107 1.13-4.47-.25-.397A9.7 9.7 0 0 1 5.25 15c0-5.93 4.82-10.75 10.751-10.75S26.75 9.07 26.75 15 21.932 24.75 16.001 24.75zm5.914-8.076c-.324-.162-1.917-.946-2.213-1.053-.297-.108-.513-.162-.729.162-.216.324-.837 1.053-1.026 1.269-.189.216-.378.243-.702.081-.324-.162-1.368-.504-2.606-1.607-.964-.86-1.615-1.923-1.804-2.247-.189-.324-.02-.5.142-.662.146-.145.324-.378.486-.567.162-.189.216-.324.324-.54.108-.216.054-.405-.027-.567-.081-.162-.729-1.757-1-2.407-.263-.632-.53-.546-.729-.556l-.621-.011c-.216 0-.567.081-.864.405-.297.324-1.134 1.107-1.134 2.7 0 1.593 1.161 3.132 1.323 3.348.162.216 2.286 3.492 5.537 4.897.774.334 1.377.534 1.847.683.776.247 1.482.212 2.041.129.623-.093 1.917-.784 2.187-1.541.27-.756.27-1.404.189-1.541-.081-.135-.297-.216-.621-.378z"/></svg>
 </a>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
 <script>
+const SUPABASE_URL = "https://aebupqjzzgsjuulcenrb.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_UL9AiQ-WC95yxP-MJZWJjA_-1ronCYFf";
+
+const supabaseClient = window.supabase.createClient(
+  SUPABASE_URL,
+  SUPABASE_ANON_KEY
+);
+
 (function(){
-  var KEY = 'nks_reviews_v1';
   var seed = [
     {name:'Ama K.', rating:5, text:"Le poisson braisé est juste incroyable, et le service pour mon anniversaire était impeccable !"},
     {name:'Kossi T.', rating:5, text:"Le grand plateau composé a fait sensation à notre réception. Vraiment magnifique et délicieux."},
     {name:'Edem A.', rating:5, text:"Très bon accueil, plats généreux et savoureux. Je recommande vivement N.K Services."}
   ];
 
-  function loadReviews(){
-    try {
-      var raw = localStorage.getItem(KEY);
-      if (raw) return JSON.parse(raw);
-    } catch(e) {}
-    return [];
-  }
-  function saveReviews(list){
-    try { localStorage.setItem(KEY, JSON.stringify(list)); } catch(e) {}
-  }
-
-  var userReviews = loadReviews();
-  var allReviews = seed.concat(userReviews);
+  var userReviews = [];
+  var allReviews = seed.slice();
 
   function starsStr(n){
     var s = '';
@@ -342,7 +340,7 @@
       div.className = 'review-item';
       var rn = document.createElement('div');
       rn.className = 'rname';
-      rn.textContent = r.name + '  ' + starsStr(r.rating);
+      rn.textContent = r.name + '  ' + starsStr(Number(r.rating));
       var rt = document.createElement('div');
       rt.className = 'rtext';
       rt.textContent = r.text;
@@ -350,22 +348,42 @@
       div.appendChild(rt);
       list.appendChild(div);
     });
+
     var total = allReviews.length;
-    var sum = allReviews.reduce(function(a,r){ return a + r.rating; }, 0);
+    var sum = allReviews.reduce(function(a,r){ return a + Number(r.rating); }, 0);
     var avg = total ? (sum/total) : 5;
     document.getElementById('avgNum').textContent = avg.toFixed(1);
     document.getElementById('avgStars').textContent = starsStr(Math.round(avg));
     document.getElementById('avgCount').textContent = 'basé sur ' + total + ' avis';
   }
 
+  async function loadReviews(){
+    var result = await supabaseClient
+      .from('reviews')
+      .select('name, rating, text, created_at')
+      .order('created_at', { ascending: true });
+
+    if (result.error) {
+      console.error('Erreur Supabase lors du chargement des avis :', result.error);
+      render();
+      return;
+    }
+
+    userReviews = result.data || [];
+    allReviews = seed.concat(userReviews);
+    render();
+  }
+
   var currentRating = 5;
   var picker = document.getElementById('starPicker');
+
   function paintPicker(v){
     var spans = picker.querySelectorAll('span');
     spans.forEach(function(sp){
       sp.classList.toggle('active', parseInt(sp.getAttribute('data-v'),10) <= v);
     });
   }
+
   picker.querySelectorAll('span').forEach(function(sp){
     sp.addEventListener('click', function(){
       currentRating = parseInt(sp.getAttribute('data-v'),10);
@@ -374,25 +392,56 @@
   });
   paintPicker(currentRating);
 
-  document.getElementById('submitReview').addEventListener('click', function(){
+  document.getElementById('submitReview').addEventListener('click', async function(){
+    var button = this;
     var name = document.getElementById('rname').value.trim() || 'Client';
     var text = document.getElementById('rtext').value.trim();
-    if (!text) { document.getElementById('rtext').focus(); return; }
-    var review = { name: name, rating: currentRating, text: text };
-    userReviews.push(review);
-    saveReviews(userReviews);
-    allReviews.push(review);
+
+    if (!text) {
+      document.getElementById('rtext').focus();
+      return;
+    }
+
+    button.disabled = true;
+    button.textContent = 'Envoi...';
+
+    var result = await supabaseClient
+      .from('reviews')
+      .insert([{
+        name: name,
+        rating: currentRating,
+        text: text
+      }])
+      .select('name, rating, text, created_at')
+      .single();
+
+    if (result.error) {
+      console.error('Erreur Supabase lors de l'enregistrement :', result.error);
+      alert("Impossible d'enregistrer l'avis pour le moment. Vérifie la configuration de la table et des règles Supabase.");
+      button.disabled = false;
+      button.textContent = 'Envoyer mon avis';
+      return;
+    }
+
+    userReviews.push(result.data);
+    allReviews.push(result.data);
     render();
+
     document.getElementById('rname').value = '';
     document.getElementById('rtext').value = '';
     currentRating = 5;
     paintPicker(5);
+
     var thanks = document.getElementById('thanksMsg');
     thanks.style.display = 'block';
     setTimeout(function(){ thanks.style.display = 'none'; }, 3000);
+
+    button.disabled = false;
+    button.textContent = 'Envoyer mon avis';
   });
 
   render();
+  loadReviews();
 })();
 </script>
 
